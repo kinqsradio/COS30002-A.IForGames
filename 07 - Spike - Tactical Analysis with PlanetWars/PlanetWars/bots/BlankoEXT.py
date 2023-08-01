@@ -1,0 +1,120 @@
+''' Simple "Blank" PlanetWars controller bot.
+
+The Bot does nothing, but shows the minimum a bot needs to have.
+
+See the `update` method which is where your code goes.
+
+The `PlanetWars` `Player` object (see players.py), will contain your bot
+controller instance. The Player will provide a current `GameInfo` instance
+to your bot `update` method each time it is called.
+
+The `gameinfo` instance is a facade of the state of the game for the `Player`,
+and includes all planets and fleets that currently exist. Note that the
+details are limited by "fog of war" vision and only match what you can see. If
+you want to know more you'll need to scout!
+
+A gameinfo instance has various (possibly useful) dict's for you to use:
+
+    # all planet and fleets (that you own or can see)
+    planets
+    fleets
+
+    # dict's of just your planets/fleets
+    my_planets
+    my_fleets
+
+    # dict's of both neutral and enemy planets/fleets
+    not_my_planets
+    not_my_fleets
+
+    # dict's of just the enemy planet/fleets (fog limited)
+    enemy_planets
+    enemy_fleets
+
+You issue orders from your bot using the methods of the gameinfo instance.
+
+    gameinfo.planet_order(src, dest, ships)
+    gameinfo.fleet_order(src, dest, ships)
+
+For example, to send 10 ships from planet src to planet dest, you would
+say `gameinfo.planet_order(src, dest, 10)`.
+
+There is also a player specific log if you want to leave a message
+
+    gameinfo.log("Here's a message from the bot")
+
+'''
+
+
+class BlankoEXT:
+
+    def __init__(self):
+        self.target_planets = set()
+
+    def update(self, gameinfo):
+        # only send one fleet at a time
+        if gameinfo.my_fleets:
+            return
+
+        # check if we should attack or defend
+        if gameinfo.my_planets and gameinfo.not_my_planets:
+            # Always send from the planet with the highest value
+            src = max(gameinfo.my_planets.values(), key=lambda p: p.num_ships)
+
+            # Filter planets based on distance and ship count
+            max_distance = 100
+            less_ships = filter(lambda x: x.num_ships < round(src.num_ships * 0.75) and x.id not in self.target_planets and src.distance_to(x) <= max_distance, gameinfo.not_my_planets.values())
+
+            # Choose destination based on the highest value that represents the ratio between distance, value, and growth rate, prioritizing weaker planets
+            dest = max(less_ships, default=min(gameinfo.not_my_planets.values(), key=lambda p: p.distance_to(src)), key=lambda p: (2 * p.num_ships + p.growth_rate) / p.distance_to(src))
+
+            # launch new fleet if there's enough ships
+            if src.num_ships > 10:
+                gameinfo.planet_order(src, dest, int(src.num_ships * 0.75))
+                self.target_planets.add(dest.id)
+
+            print("Planet {} attacked Planet {} from a distance of {:.2f} with {} ships".format(src.id, dest.id, round(src.distance_to(dest)), round(src.num_ships * 0.75)))
+            
+
+            # Defend planets under attack
+            #Checking if there's any incoming fleets?
+            for planet in gameinfo.my_planets.values():
+                
+                incoming_fleets = []
+
+                for fleets in gameinfo.enemy_fleets:
+                    fleet = gameinfo.get_fleet_by_id(fleets)  
+                    
+                    #print(fleet)  # Testing
+                    
+                    # if fleet.dest.id == planet.id:
+                    #         incoming_fleets.append(fleet)
+                            
+                            
+                    try:
+                        if fleet.dest.id == planet.id:
+                            incoming_fleets.append(fleet)
+                    except AttributeError as e:
+                        print(f"AttributeError: {e}")
+
+                # If there is, send fleets for defends or find friendly planet for reinforcement
+                if incoming_fleets:
+                    total_incoming_ships = sum(fleet.num_ships for fleet in incoming_fleets)
+                    if planet.num_ships < total_incoming_ships:
+                        # find the nearest friendly planet with enough ships for reinforcement
+                        planets_with_enough_ships = [p for p in gameinfo.my_planets.values() if p.num_ships > total_incoming_ships and p.id != planet.id]
+                        nearest_planet = min(planets_with_enough_ships, default=None, key=lambda p: p.distance_to(planet))
+
+                        if nearest_planet:
+                            required_ships = total_incoming_ships - planet.num_ships + 1
+                            gameinfo.planet_order(nearest_planet, planet, required_ships) # Send reinforcement
+
+                            print("Planet {} sent {} ships to defend Planet {}".format(nearest_planet.id, required_ships, planet.id))
+                            
+                            
+            # Send scouts to enemy planets
+            for planet in gameinfo.enemy_planets.values():
+                if planet.id not in self.target_planets:
+                    scout_src = min(gameinfo.my_planets.values(), key=lambda p: p.distance_to(planet))
+                    gameinfo.planet_order(scout_src, planet, 1) # Send scouts
+                    self.target_planets.add(planet.id)

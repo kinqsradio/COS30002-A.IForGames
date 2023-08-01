@@ -1,0 +1,240 @@
+#FSM Chart
+
+#  ┌───────────────┐
+#  │idle / healing │
+#  └──────┬────────┘
+#         │
+#    attacking
+#         │
+#  ┌──────┴─────────┐
+#  │  move / attack │
+#  └────────────────┘
+#   +---------+
+import time
+
+class State:
+    def __init__(self, states):
+        self.states = states
+
+
+class GameCharacter:
+    def __init__(self, name, attack_range, hp, dmg):
+        self.name = name
+        self.state = "idle"
+        self.range = attack_range
+        self.health = hp #Health change after taken damge
+        self.max_health = hp #Max health (unchange)
+        self.damage = dmg
+        self.available_states = State(["idle", "attacking", "healing"])
+
+    def set_state(self, new_state):
+        #Check if new state is avaialble
+        if new_state in self.available_states.states:
+            self.state = new_state
+
+
+class GameRule:
+    def __init__(self):
+        # Set up player
+        # player1
+        #attack_range, hp, dmg
+        self.player1 = GameCharacter("Player 1",10, 100, 10)
+
+        # player2
+        #attack_range, hp, dmg
+        self.player2 = GameCharacter("Player 2", 20, 100, 3)
+
+        # Set up player position
+        self.player1_pos = 0
+        self.player2_pos = 50
+
+        # Set up round counter and maximum number of rounds
+        self.round_counter = 1
+        self.max_rounds = 1000
+
+        # Set up turn tracker
+        self.turn = 1
+        
+
+    def play_game(self):
+        print(f"Player 1 is now {self.player1.state}")
+        print(f"Player 2 is now {self.player2.state}")
+        
+        while True:
+            print(f"Round {self.round_counter}")
+            print(f"Player 1's health: {self.player1.health}")
+            print(f"Player 2's health: {self.player2.health}")
+
+            # Player turns
+            for _ in range(2):
+                time.sleep(1)
+                # Player 1's turn
+                if self.turn == 1:
+                    if self.player1.state == "idle":
+                        print(f"Player 1 is now {self.player1.state}!")
+                        self.player1.health += 2
+                        if self.player1.health > 100:
+                            self.player1.health = 100
+                        self.player1.set_state("attacking")
+                        
+                    elif self.player1.health < self.player1.max_health * 0.25:
+                        print(f"Player 1 is now {self.player1.state}")
+                        self.player1.set_state("healing")
+                        if self.player1.state == "healing":
+                            self.player1.health += 25
+                            self.player2.damage += (self.player1.health * 0.25) #This is way too overpower
+                            if self.player1.health > 100:
+                                self.player1.health = 100
+                            self.player1.set_state("attacking")
+                            
+                            
+                    elif self.player1.state == "attacking":
+                        if self.player2_pos - self.player1_pos > self.player1.range: #If the range between players are > attack range of player: start moving to hunt down enemy
+                            print(f"Player 1 is now moving!")
+                            self.player1_pos += 1
+                        else:
+                            self.player2.health -= self.player1.damage #Otherwise in range = attack => enemy health depending on dmdage
+                            print(f"Player 1 hits Player 2 for {self.player1.damage} damage. Player 2's health: {self.player2.health}")
+                            self.player1.set_state("idle")
+                            self.turn = 2
+
+                    self.turn = 2
+
+                # Player 2's turn
+                elif self.turn == 2:
+                    if self.player2.state == "idle":
+                        print(f"Player 2 is now {self.player2.state}!")
+                        self.player2.health += 2
+                        if self.player2.health > 100:
+                            self.player2.health = 100
+                        self.player2.set_state("attacking")
+                        
+                    elif self.player2.health < self.player2.max_health * 0.25:
+                        self.player2.set_state("healing")
+                        if self.player2.state == "healing":
+                            print(f"Player 2 is now {self.player2.state}")
+                            self.player2.health += 25
+                            self.player1.damage += (self.player2.health * 0.25) #This is way too overpower
+
+                            if self.player2.health > 100:
+                                self.player2.health = 100
+                            self.player2.set_state("attacking")
+                            
+                            
+                    elif self.player2.state == "attacking":
+                        if self.player2_pos - self.player1_pos > self.player2.range: #If the range between players are > attack range of player: start moving to hunt down enemy
+                            print(f"Player 2 is now moving!")
+                            self.player2_pos -= 1
+                        else:
+                            self.player1.health -= self.player2.damage #Otherwise in range = attack => enemy health depending on dmdage
+                            print(f"Player 2 hits Player 1 for {self.player2.damage} damage. Player 1's health: {self.player1.health}")
+                            self.player2.set_state("idle")
+                            self.turn = 1
+
+                    self.turn = 1
+
+                # Check for end of game
+                if self.round_counter >= self.max_rounds or self.player1.health <= 0 or self.player2.health <= 0:
+                    break
+
+            # Increase round counter
+            self.round_counter += 1
+
+            # Check for end of game
+            if self.round_counter >= self.max_rounds or self.player1.health <= 0 or self.player2.health <= 0:
+                print("Game over!")
+                if self.player1.health <= 0 and self.player2.health <= 0:
+                    print("It's a tie!")
+                elif self.player1.health <= 0:
+                    print("Player 2 wins!")
+                else:
+                    print("Player 1 wins!")
+                return
+   
+   
+    #Old code + Bugs (Not in used)
+    # def play_game(self):
+    #     print(f"Player 1 is now {self.player1.state}")
+    #     print(f"Player 2 is now {self.player2.state}")
+    #     while True:
+    #         print(f"Round {self.round_counter}")
+    #         print(f"Player 1's health: {self.player1.health}")
+    #         print(f"Player 2's health: {self.player2.health}")
+
+
+    #         # Player turns
+    #         # Player turns
+    #         for _ in range(2):
+    #             time.sleep(1)
+    #             # Player 1's turn
+    #             if self.turn == 1:
+    #                 if self.player1.state == "idle":
+    #                     print(f"Player 1 is now {self.player1.state} for recovering!")
+    #                     self.player1.health += 2
+    #                     if self.player1.health > 100:
+    #                         self.player1.health = 100
+    #                     self.player1.set_state("attacking")
+    #                 elif self.player1.state == "attacking":
+    #                     if self.player1_pos - self.player2_pos > self.player1.range:
+    #                         self.player1_pos -= 1
+    #                     elif self.player1.health < self.player1.max_health - 50:
+    #                         print(f"Player 1 is now {self.player1.state}")
+    #                         self.player1.set_state("healing")
+    #                         self.player1.health += 10
+    #                         if self.player1.health > 100:
+    #                             self.player1.health = 100
+    #                     else:
+    #                         self.player2.health -= self.player1.damage
+    #                         print(f"Player 1 hits Player 2 for {self.player1.damage} damage. Player 2's health: {self.player2.health}")
+    #                         self.player1.set_state("idle")
+
+
+    #                 self.turn = 2
+
+    #             # Player 2's turn
+    #             elif self.turn == 2:
+    #                 if self.player2.state == "idle":
+    #                     print(f"Player 2 is now {self.player2.state} for recovering!")
+    #                     self.player2.health += 2
+    #                     if self.player2.health > 100:
+    #                         self.player2.health = 100
+    #                     self.player2.set_state("attacking")
+    #                 elif self.player2.state == "attacking":
+    #                     if self.player2_pos - self.player2_pos > self.player2.range:
+    #                         self.player2_pos -= 1
+    #                     elif self.player2.health < self.player2.max_health - 50:
+    #                         print(f"Player 2 is now {self.player2.state}")
+    #                         self.player2.set_state("healing")
+    #                         self.player2.health += 10
+    #                         if self.player2.health > 100:
+    #                             self.player2.health = 100
+    #                     else:
+    #                         self.player2.health -= self.player2.damage
+    #                         print(f"Player 2 hits Player 1 for {self.player2.damage} damage. Player 2's health: {self.player2.health}")
+    #                         self.player2.set_state("idle")
+
+
+    #                 self.turn = 1
+
+    #             # Check for end of game
+    #             if self.round_counter > self.max_rounds or self.player1.health <= 0 or self.player2.health <= 0:
+    #                 break
+
+    #         # Increase round counter
+    #         self.round_counter += 1
+
+    #         # Check for end of game
+    #         if self.round_counter > self.max_rounds or self.player1.health <= 0 or self.player2.health <= 0:
+    #             print("Game over!")
+    #             if self.player1.health <= 0 and self.player2.health <= 0:
+    #                 print("It's a tie!")
+    #             elif self.player1.health <= 0:
+    #                 print("Player 2 wins!")
+    #             else:
+    #                 print("Player 1 wins!")
+    #             return
+
+
+
+game = GameRule()
+game.play_game()

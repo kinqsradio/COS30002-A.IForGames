@@ -1,0 +1,264 @@
+from vector2d import Vector2D
+from vector2d import Point2D
+from graphics import egi, KEY
+from math import sin, cos, radians, pi
+from random import random, randrange, uniform
+from path import Path
+from weapon import Weapon
+
+class Agent(object):
+
+    def __init__(self, world=None, scale=30.0, mass=1.0, mode='patrol'):
+        # keep a reference to the world object
+        self.world = world
+        self.mode = mode
+
+        # where am i and where am i going? random start pos
+        dir = radians(random()*360)
+        self.pos = Vector2D(randrange(world.cx), randrange(world.cy))
+        self.vel = Vector2D()
+        self.heading = Vector2D(sin(dir), cos(dir))
+        self.side = self.heading.perp()
+        self.scale = Vector2D(scale, scale)  # easy scaling of agent size
+        self.force = Vector2D()  # current steering force
+        self.accel = Vector2D() # current acceleration due to force
+        self.mass = mass
+
+        # data for drawing this agent
+        self.color = 'WHITE'
+        self.vehicle_shape = [
+            Point2D(-1.0,  0.6),
+            Point2D( 1.0,  0.0),
+            Point2D(-1.0, -0.6)
+        ]
+
+        # Path to follow
+        self.path = world.path
+        self.waypoint_threshold = 100.0
+
+        # Force and speed limiting code
+        self.max_speed = 20.0 * scale
+        self.max_force = 500.0
+
+        # Shooting variables
+        self.weapon = None #Weapon(self, world)
+        self.weapons = {
+            'Rifle': Weapon(agent=self, world=world, damage = 10, proj_speed=1000.0, accuracy=1.0, fire_rate=20, color='WHITE'),
+            'Rocket': Weapon(agent=self, world=world, damage = 10, proj_speed=2000.0, accuracy=1.0, fire_rate=40, color='ORANGE'),
+            'Hand Gun': Weapon(agent=self, world=world, damage = 5, proj_speed=5000.0, accuracy=0.5, fire_rate=10, color='BLUE'),
+            'Handgrenade': Weapon(agent=self, world=world, damage = 1, proj_speed=10000.0, accuracy=0.5, fire_rate=60, color='GREEN')
+        }
+        self.current_weapon =  'Rifle'
+        
+        self.shooting_distance = 100.0
+
+        self.separation = 200.0
+
+        # debug draw info?
+        self.show_info = True
+
+    def calculate(self,delta):
+        # calculate the current steering force
+        mode = self.mode
+        force = Vector2D(0,0)
+        if mode == 'patrol':
+            force = self.follow_path()
+        elif mode == 'attack':
+            force = self.attack()
+        else:
+            force = Vector2D()
+        force += self.separate()
+        force += self.avoid_objects()
+        self.force = force
+        return force
+
+    def update(self, delta):
+        ''' Check if state needs to be updated '''
+        self.check_state()
+        current_weapon = self.weapons[self.current_weapon]
+        current_weapon.update(delta)
+        # Shoot
+        target_enemy = self.get_closest_enemy()
+        if self.mode == 'attack':
+            current_weapon = self.weapons[self.current_weapon]
+            current_weapon.shoot(target_enemy)
+
+            
+        if target_enemy is not None:
+            current_weapon.shoot(target_enemy)
+        self.update_weapons(delta)
+    
+        ''' update vehicle position and orientation '''
+        # calculate and set self.force to be applied
+        ## force = self.calculate()
+        force = self.calculate(delta)
+        ## limit force? <-- for wander
+        force.truncate(self.max_force)
+        # determine the new acceleration
+        self.accel = force / self.mass  # not needed if mass = 1.0
+        # new velocity
+        self.vel += self.accel * delta
+        # check for limits of new velocity
+        self.vel.truncate(self.max_speed)
+        # update position
+        self.pos += self.vel * delta
+        # update heading is non-zero velocity (moving)
+        if self.vel.lengthSq() > 0.00000001:
+            self.heading = self.vel.get_normalised()
+            self.side = self.heading.perp()
+        # treat world as continuous space - wrap new position if needed
+        self.world.wrap_around(self.pos)
+        
+        
+
+    def update_weapons(self, delta):
+        for weapon in self.weapons.values():
+            weapon.update(delta)
+        self.weapon = self.weapons[self.current_weapon]
+
+            
+    def switch_weapon(self, weapon_name):
+        if weapon_name in self.weapons:
+            self.current_weapon = weapon_name
+            self.weapon = self.weapons[self.current_weapon]  # update the current weapon object
+            print(self.current_weapon)
+        else:
+            print(f"Error: Weapon '{weapon_name}' not found.")
+
+
+    def get_closest_enemy(self):
+        closest_enemy = None
+        closest_distance = float('inf')
+
+        for enemy in self.world.enemies:
+            if enemy.alive:
+                distance = (enemy.pos - self.pos).length()
+                if distance < closest_distance:
+                    closest_distance = distance
+                    closest_enemy = enemy
+
+        return closest_enemy
+
+    def check_state(self):
+        ''' check if state should be updated '''
+        alive_enemies = list(filter(lambda e: e.alive == True, self.world.enemies))
+        if alive_enemies:
+            self.mode = 'attack'
+        else:
+            self.mode = 'patrol'
+
+    def render(self, color=None):
+        ''' Draw the triangle agent with color'''
+        # draw the ship
+        egi.set_pen_color(name=self.color)
+        pts = self.world.transform_points(self.vehicle_shape, self.pos,
+                                          self.heading, self.side, self.scale)
+        # draw it!
+        egi.closed_shape(pts)
+        if self.mode == 'attack': self.weapon.render()
+        if self.mode == 'attack':
+            egi.set_pen_color(name='RED')
+            for enemy in self.world.enemies:
+                if enemy.alive:
+                    egi.line(self.pos.x, self.pos.y, enemy.pos.x, enemy.pos.y)
+
+
+        # draw the path if it exists and the mode is follow
+        if self.show_info:
+            self.path.render()
+
+    def speed(self):
+        return self.vel.length()
+
+    #--------------------------------------------------------------------------
+    def seek(self, target_pos):
+        ''' move towards target position '''
+        desired_vel = (target_pos - self.pos).normalise() * self.max_speed
+        return (desired_vel - self.vel)
+
+    def arrive(self, target_pos):
+        ''' this behaviour is similar to seek() but it attempts to arrive at
+            the target position with a zero velocity'''
+        decel_rate = 1
+        to_target = target_pos - self.pos
+        dist = to_target.length()
+        # calculate the speed required to reach the target given the
+        # desired deceleration rate
+        speed = dist / decel_rate
+        # make sure the velocity does not exceed the max
+        speed = min(speed, self.max_speed)
+        # from here proceed just like Seek except we don't need to
+        # normalize the to_target vector because we have already gone to the
+        to_target.normalise()
+        # trouble of calculating its length for dist.
+        desired_vel = to_target * speed
+        return (desired_vel - self.vel)
+
+    def follow_path(self):
+        if (self.path.is_finished()):
+            # Arrives at the final waypoint
+            return self.arrive(self.path._pts[-1])
+        else:
+            # Goes to the current waypoint and increments on arrival
+            to_target = self.path.current_pt() - self.pos
+            dist = to_target.length()
+            if (dist < self.waypoint_threshold):
+                if self.current_pos_grid(self.path.current_pt()):
+                    print(self.current_pos_grid(self.path.current_pt()))
+                    self.path.inc_current_pt()
+            return self.arrive(self.path.current_pt())
+        
+    def current_pos_grid(self, pos):
+        return self.world.grid.get_node(pos) == self.world.grid.get_node(self.pos)
+
+    def attack(self):
+        # Find the closest alive enemy
+        alive = list(filter(lambda e: e.alive, self.world.enemies))
+        closest = min(alive, key=lambda e: (e.pos - self.pos).length())
+        
+        
+        to_closest = closest.pos - self.pos
+        to_closest -= self.heading.copy() * self.shooting_distance
+
+        dead = list(filter(lambda e: not e.alive, self.world.enemies))
+        if dead:
+            closest_dead = min(dead, key=lambda e: (e.pos - self.pos).length())
+            to_closest_dead = closest_dead.pos - self.pos
+            dist = to_closest_dead.length()
+            angle = self.vel.angle_with(to_closest_dead)
+            ratio = dist / angle
+            if 0 < ratio < closest_dead.scale.length() / 2:
+                to_closest += self.vel.perp().get_reverse().normalise()
+            else:
+                to_closest += self.vel.perp().normalise()
+
+        return self.arrive(self.pos + to_closest)
+
+    def separate(self):
+        # Moves away from nearby agent
+        closeby = list(filter(lambda a: a is not self and (a.pos - self.pos).length() < self.separation,self.world.agents))
+        if (closeby):
+            closest_agent_pos = min(closeby,key = lambda a: (a.pos - self.pos).length()).pos
+            target = (2 * self.pos - closest_agent_pos)
+            to_target = target - self.pos
+            length = to_target.copy().length()
+            to_target.normalise()
+            to_target *= self.separation - length
+            return to_target
+        return Vector2D()
+    
+    def avoid_objects(self):
+        avoid_force = Vector2D()
+        for obj in self.world.blocks:
+            # Calculate vector from object to agent
+            from_object = self.pos - obj.pos
+            distance = from_object.length()
+            # Check if object is near
+            if distance < self.world.grid.grid_size:
+                # Calculate a force to push the agent away from the object
+                # The closer the object, the larger the force
+                avoid_force += from_object.normalise() / distance
+        # Normalize the avoid force to prevent it from growing excessively large
+        if avoid_force.length() > 0:
+            avoid_force = avoid_force.normalise()
+        return avoid_force
